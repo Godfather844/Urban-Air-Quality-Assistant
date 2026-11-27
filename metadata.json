@@ -1,0 +1,6 @@
+{
+  "name": "Urban Air Quality Assistant",
+  "description": "Accessible urban air quality dashboard with city presets, custom AQI/PM2.5/PM10 readings, and Gemini-powered health, commute, mask, and Q&A guidance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
