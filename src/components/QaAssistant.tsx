@@ -1,18 +1,11 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useId, type FormEvent } from 'react';
 import { Send, Trash2 } from 'lucide-react';
 import {
+  QA_LIMITS,
   type AirQualityReading,
-  type QaTurn,
   getAqiCategory,
-  sanitizePlainText,
 } from '../../shared/airQuality.ts';
-import { askAirQualityQuestion } from '../lib/api.ts';
-
-interface QaMessage extends QaTurn {
-  id: string;
-  source?: 'gemini' | 'fallback';
-  warning?: string;
-}
+import { useAirQualityQa } from '../hooks/useAirQualityQa.ts';
 
 interface QaAssistantProps {
   reading: AirQualityReading;
@@ -26,92 +19,19 @@ const STARTER_QUESTIONS = [
 ] as const;
 
 export function QaAssistant({ reading }: QaAssistantProps) {
-  const [messages, setMessages] = useState<QaMessage[]>([]);
-  const [questionInput, setQuestionInput] = useState('');
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
-  const [isAsking, setIsAsking] = useState(false);
+  const {
+    messages,
+    questionInput,
+    validationError,
+    requestError,
+    isAsking,
+    setQuestionInput,
+    submitQuestion,
+    clearMessages,
+  } = useAirQualityQa(reading);
 
   const inputId = useId();
-  const abortRef = useRef<AbortController | null>(null);
-  const readingKey = `${reading.city}|${reading.aqi}|${reading.pm25}|${reading.pm10}`;
   const category = getAqiCategory(reading.aqi);
-
-  // Reset conversation when active location reading changes so answers remain grounded
-  useEffect(() => {
-    abortRef.current?.abort();
-    setMessages([]);
-    setRequestError(null);
-    setValidationError(null);
-    setIsAsking(false);
-  }, [readingKey]);
-
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
-
-  async function submitQuestion(rawText: string) {
-    const cleaned = sanitizePlainText(rawText, 400);
-    if (cleaned.length < 3) {
-      setValidationError('Please enter at least 3 characters for your air-quality question.');
-      return;
-    }
-
-    setValidationError(null);
-    setRequestError(null);
-
-    const userTurn: QaMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: cleaned,
-    };
-
-    const historyForApi: QaTurn[] = messages.slice(-6).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
-    setMessages((prev) => [...prev, userTurn]);
-    setQuestionInput('');
-    setIsAsking(true);
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const response = await askAirQualityQuestion(
-        reading,
-        cleaned,
-        historyForApi,
-        controller.signal
-      );
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: response.answer,
-          source: response.source,
-          warning: response.warning,
-        },
-      ]);
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        return;
-      }
-      setRequestError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to reach the assistant right now. Please try again.'
-      );
-    } finally {
-      setIsAsking(false);
-    }
-  }
 
   function handleFormSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -146,12 +66,7 @@ export function QaAssistant({ reading }: QaAssistantProps) {
         {messages.length > 0 && (
           <button
             type="button"
-            onClick={() => {
-              abortRef.current?.abort();
-              setMessages([]);
-              setRequestError(null);
-              setIsAsking(false);
-            }}
+            onClick={clearMessages}
             className="inline-flex min-h-[38px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -178,11 +93,7 @@ export function QaAssistant({ reading }: QaAssistantProps) {
           </div>
         </div>
 
-        <div
-          aria-live="polite"
-          aria-relevant="additions"
-          className="mt-5 space-y-4"
-        >
+        <div aria-live="polite" aria-relevant="additions" className="mt-5 space-y-4">
           {messages.length === 0 ? (
             <div className="rounded-md border border-dashed border-slate-200 bg-slate-50/70 px-5 py-6 text-sm text-slate-600">
               Ask a practical question about commuting, exercise timing, air purifiers, school
@@ -245,7 +156,7 @@ export function QaAssistant({ reading }: QaAssistantProps) {
               Ask a follow-up air quality question
             </label>
             <span className="font-mono text-[11px] tabular-nums text-slate-500">
-              {questionInput.length}/400
+              {questionInput.length}/{QA_LIMITS.questionMaxLength}
             </span>
           </div>
 
@@ -254,11 +165,8 @@ export function QaAssistant({ reading }: QaAssistantProps) {
               id={inputId}
               type="text"
               value={questionInput}
-              onChange={(e) => {
-                setQuestionInput(e.target.value);
-                if (validationError) setValidationError(null);
-              }}
-              maxLength={400}
+              onChange={(e) => setQuestionInput(e.target.value)}
+              maxLength={QA_LIMITS.questionMaxLength}
               disabled={isAsking}
               placeholder={`Ask about ${reading.city}'s air quality, masks, or indoor air…`}
               aria-invalid={Boolean(validationError)}
@@ -280,7 +188,11 @@ export function QaAssistant({ reading }: QaAssistantProps) {
           </div>
 
           {validationError && (
-            <p id={`${inputId}-error`} role="alert" className="mt-1.5 text-xs font-medium text-red-700">
+            <p
+              id={`${inputId}-error`}
+              role="alert"
+              className="mt-1.5 text-xs font-medium text-red-700"
+            >
               {validationError}
             </p>
           )}

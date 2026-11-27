@@ -15,30 +15,45 @@ An accessible, lightweight full-stack web application that translates urban air 
 ## Architecture
 
 ```text
-├── server.ts                 # Full-stack entry point (Express + Vite dev middleware / dist static)
+├── server.ts                       # Full-stack entry point (Express + Vite dev / dist static + graceful shutdown)
 ├── server/
-│   ├── app.ts                # Express API routes, validation, security headers, rate limiter
-│   └── gemini.ts             # Server-side @google/genai client, structured JSON schema, TTL cache
+│   ├── app.ts                      # Express API routes (/api/health, /api/presets, /api/advisory, /api/qa)
+│   ├── cache.ts                    # Bounded in-memory TtlCache for fast repeat advisories
+│   ├── config.ts                   # Centralized runtime limits, env key lookup, and sanitized logging
+│   ├── gemini.ts                   # Server-side @google/genai integration with responseSchema and fallback
+│   └── middleware.ts               # Security headers, memory-bounded per-IP rate limiter, JSON error handler
 ├── shared/
-│   └── airQuality.ts         # Shared TypeScript types, AQI mapping, presets, validation, formatters
+│   ├── airQuality.ts               # Public domain barrel re-export
+│   ├── aqi.ts                      # Five-band AQI classification, metadata tokens, and WHO ratio math
+│   ├── fallback.ts                 # Evidence-based fallback advisory and topic-aware Q&A builders
+│   ├── presets.ts                  # Curated preset cities, WHO guidelines, and validation bounds
+│   ├── types.ts                    # Shared strict TypeScript contracts
+│   └── validation.ts               # Input validation, text sanitization, and response formatting
 ├── src/
-│   ├── App.tsx               # Main application state and AbortController-safe data loading
-│   ├── lib/api.ts            # Typed frontend client for /api/advisory and /api/qa
+│   ├── App.tsx                     # Root application layout
+│   ├── main.tsx                    # StrictMode + ErrorBoundary entry mount
+│   ├── lib/api.ts                  # Typed fetch client with AbortController guard
+│   ├── hooks/
+│   │   ├── useAdvisory.ts          # Advisory fetch lifecycle and stale-request cancellation
+│   │   └── useAirQualityQa.ts      # Grounded Q&A state and automatic reading-change reset
 │   └── components/
-│       ├── Header.tsx        # Accessible skip link + 3-zone navigation header
-│       ├── CitySelector.tsx  # Searchable preset list + validated custom sensor form
-│       ├── AqiOverview.tsx   # AQI focal readout, meter, WHO ratios, health summary
-│       ├── AdvisoryPanel.tsx # Outdoor/commute/mask guidance + sensitive group filter
-│       └── QaAssistant.tsx   # Grounded follow-up Q&A chat with polite aria-live updates
+│       ├── Header.tsx              # Accessible skip link + 3-zone navigation bar
+│       ├── CitySelector.tsx        # Tabbed monitoring station container
+│       ├── PresetCityList.tsx      # Searchable preset city list
+│       ├── CustomReadingForm.tsx   # Validated custom city/AQI/PM2.5/PM10 input form
+│       ├── AqiOverview.tsx         # AQI readout, calibrated severity meter, WHO particulate benchmarks
+│       ├── AdvisoryPanel.tsx       # Outdoor/commute/mask guidance + filterable sensitive groups
+│       ├── QaAssistant.tsx         # Grounded follow-up Q&A interface with aria-live updates
+│       └── ErrorBoundary.tsx       # Accessible React error boundary
 └── tests/
-    └── airQuality.test.ts    # Automated unit and Express API integration tests
+    └── airQuality.test.ts          # Automated unit, cache, and Express API integration tests
 ```
 
 ## How Gemini AI Is Used
 
 All calls to the `@google/genai` SDK run strictly on the Express backend (`server/gemini.ts`) using `process.env.GEMINI_API_KEY`:
 
-1. **Structured Advisory (`POST /api/advisory`)**: Calls `gemini-4-hydrogen` with `responseMimeType: "application/json"` and a strict `responseSchema` (`Type.OBJECT`) to generate structured outdoor, commute, mask, indoor, sensitive-group, and priority checklist guidance. Results are cached in memory (5-minute TTL, capped at 50 entries) to reduce redundant token usage and speed up city switching.
+1. **Structured Advisory (`POST /api/advisory`)**: Calls `gemini-4-hydrogen` with `responseMimeType: "application/json"` and a strict `responseSchema` (`Type.OBJECT`) to generate structured outdoor, commute, mask, indoor, sensitive-group, and priority checklist guidance. Results are cached in memory via `TtlCache` (5-minute TTL, capped at 50 entries) to reduce redundant token usage and speed up city switching.
 2. **Grounded Follow-Up Q&A (`POST /api/qa`)**: Calls `gemini-4-hydrogen` with the active city's AQI, PM2.5, PM10, and recent bounded conversation turns so answers remain concise, practical, and location-specific.
 
 ## Environment Variables
@@ -49,7 +64,7 @@ Copy `.env.example` to `.env` for local development (never commit `.env` or hard
 GEMINI_API_KEY="your_server_side_gemini_api_key"
 ```
 
-- `GEMINI_API_KEY`: Read exclusively on the backend (`server/gemini.ts`). Never exposed to the browser bundle. If omitted, the application runs cleanly in documented fallback mode.
+- `GEMINI_API_KEY`: Read exclusively on the backend (`server/config.ts`). Never exposed to the browser bundle. If omitted, the application runs cleanly in documented fallback mode.
 
 ## Setup & Scripts
 
@@ -60,12 +75,11 @@ npm install
 # Run full-stack development server on http://localhost:3000
 npm run dev
 
-# Run automated unit and API integration tests
+# Run automated unit, cache, and API integration tests
 npm test
 
-# Type-check and build for production
-npm run lint
-npm run build
+# Run strict TypeScript type-checking, tests, and production build together
+npm run check
 ```
 
 ## Security, Efficiency & Accessibility Practices

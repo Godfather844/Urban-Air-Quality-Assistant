@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   PRESET_CITIES,
-  type AdvisoryResponsePayload,
   type AirQualityReading,
   WHO_24H_GUIDELINES,
 } from '../shared/airQuality.ts';
@@ -10,7 +9,7 @@ import { AqiOverview } from './components/AqiOverview.tsx';
 import { CitySelector, type SelectorTab } from './components/CitySelector.tsx';
 import { Header } from './components/Header.tsx';
 import { QaAssistant } from './components/QaAssistant.tsx';
-import { fetchAdvisory } from './lib/api.ts';
+import { useAdvisory } from './hooks/useAdvisory.ts';
 
 const INITIAL_READING: AirQualityReading = {
   city: PRESET_CITIES[0].city,
@@ -26,52 +25,9 @@ const INITIAL_READING: AirQualityReading = {
 export default function App() {
   const [activeReading, setActiveReading] = useState<AirQualityReading>(INITIAL_READING);
   const [selectorTab, setSelectorTab] = useState<SelectorTab>('presets');
-  const [advisoryData, setAdvisoryData] = useState<AdvisoryResponsePayload | null>(null);
-  const [isLoadingAdvisory, setIsLoadingAdvisory] = useState<boolean>(true);
-  const [advisoryError, setAdvisoryError] = useState<string | null>(null);
-
   const customCityInputRef = useRef<HTMLInputElement | null>(null);
-  const activeControllerRef = useRef<AbortController | null>(null);
 
-  const loadAdvisory = useCallback(
-    async (reading: AirQualityReading, refresh = false) => {
-      activeControllerRef.current?.abort();
-      const controller = new AbortController();
-      activeControllerRef.current = controller;
-
-      setIsLoadingAdvisory(true);
-      setAdvisoryError(null);
-
-      try {
-        const result = await fetchAdvisory(reading, {
-          signal: controller.signal,
-          refresh,
-        });
-        setAdvisoryData(result);
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') {
-          return;
-        }
-        setAdvisoryError(
-          err instanceof Error
-            ? err.message
-            : 'Unable to fetch air quality guidance. Please try again.'
-        );
-      } finally {
-        if (activeControllerRef.current === controller) {
-          setIsLoadingAdvisory(false);
-        }
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    void loadAdvisory(activeReading, false);
-    return () => {
-      activeControllerRef.current?.abort();
-    };
-  }, [activeReading, loadAdvisory]);
+  const { advisoryData, isLoading, error, refresh } = useAdvisory(activeReading);
 
   function handleOpenCustomInput() {
     setSelectorTab('custom');
@@ -107,9 +63,9 @@ export default function App() {
             <AdvisoryPanel
               reading={activeReading}
               advisoryData={advisoryData}
-              isLoading={isLoadingAdvisory}
-              error={advisoryError}
-              onRefresh={() => void loadAdvisory(activeReading, true)}
+              isLoading={isLoading}
+              error={error}
+              onRefresh={refresh}
             />
 
             <QaAssistant reading={activeReading} />

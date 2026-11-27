@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { describe, it } from 'node:test';
 import { createApiApp } from '../server/app.ts';
+import { TtlCache } from '../server/cache.ts';
 import {
   PRESET_CITIES,
   buildFallbackAdvisory,
@@ -45,6 +46,7 @@ describe('AQI category mapping and calibration', () => {
     for (const preset of PRESET_CITIES) {
       const meta = getAqiCategoryMeta(preset.aqi);
       assert.ok(meta.healthSummary.length > 20);
+      assert.ok(meta.textClass.startsWith('text-'));
     }
   });
 });
@@ -117,7 +119,10 @@ describe('Assistant response formatting and fallback guidance', () => {
     const formatted = formatAssistantText(raw, 200);
     assert.equal(formatted, 'Heading\nWear an N95 mask today.\n\nStay safe outdoors.');
 
-    const truncated = formatAssistantText('First sentence. Second sentence is much longer than the limit.', 25);
+    const truncated = formatAssistantText(
+      'First sentence. Second sentence is much longer than the limit.',
+      25
+    );
     assert.ok(truncated.length <= 26);
   });
 
@@ -151,12 +156,30 @@ describe('Assistant response formatting and fallback guidance', () => {
   });
 });
 
+describe('Bounded TtlCache', () => {
+  it('expires stale entries and evicts the oldest entry when at capacity', () => {
+    const cache = new TtlCache<string>(1_000, 2);
+    cache.set('first', 'v1', 100);
+    cache.set('second', 'v2', 200);
+    assert.equal(cache.get('first', 500), 'v1');
+    assert.equal(cache.size, 2);
+
+    cache.set('third', 'v3', 300);
+    assert.equal(cache.get('first', 500), undefined);
+    assert.equal(cache.get('second', 500), 'v2');
+    assert.equal(cache.get('third', 500), 'v3');
+
+    assert.equal(cache.get('second', 1_250), undefined);
+    assert.equal(cache.size, 1);
+  });
+});
+
 describe('Express API integration tests', () => {
-  it('validates requests and returns structured fallback responses when API key is absent', async () => {
+  it('validates requests, handles malformed JSON and 404s, and returns structured fallbacks', async () => {
     const previousKey = process.env.GEMINI_API_KEY;
     delete process.env.GEMINI_API_KEY;
 
-    const app = createApiApp();
+    const app = createApiApp({ rateLimitMaxRequests: 20, rateLimitWindowMs: 60_000 });
     const server = app.listen(0);
     const { port } = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${port}`;
@@ -164,9 +187,20 @@ describe('Express API integration tests', () => {
     try {
       const healthRes = await fetch(`${baseUrl}/api/health`);
       assert.equal(healthRes.status, 200);
+      assert.equal(healthRes.headers.get('x-content-type-options'), 'nosniff');
       const healthBody = (await healthRes.json()) as { status: string; presetCount: number };
       assert.equal(healthBody.status, 'ok');
       assert.equal(healthBody.presetCount, PRESET_CITIES.length);
+
+      const unknownRes = await fetch(`${baseUrl}/api/does-not-exist`);
+      assert.equal(unknownRes.status, 404);
+
+      const malformedRes = await fetch(`${baseUrl}/api/advisory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{invalid-json',
+      });
+      assert.equal(malformedRes.status, 400);
 
       const badAdvisoryRes = await fetch(`${baseUrl}/api/advisory`, {
         method: 'POST',
@@ -202,6 +236,35 @@ describe('Express API integration tests', () => {
       const qaBody = (await okQaRes.json()) as { source: string; answer: string };
       assert.equal(qaBody.source, 'fallback');
       assert.match(qaBody.answer, /safe|Good/i);
+    } finally {
+      if (previousKey !== undefined) {
+        process.env.GEMINI_API_KEY = previousKey;
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('enforces per-IP rate limiting with HTTP 429 and Retry-After header', async () => {
+    const previousKey = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+
+    const app = createApiApp({ rateLimitMaxRequests: 2, rateLimitWindowMs: 60_000 });
+    const server = app.listen(0);
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      const payload = JSON.stringify({ city: 'Tokyo', aqi: 36, pm25: 9, pm10: 19 });
+      const headers = { 'Content-Type': 'application/json' };
+
+      const first = await fetch(`${baseUrl}/api/advisory`, { method: 'POST', headers, body: payload });
+      const second = await fetch(`${baseUrl}/api/advisory`, { method: 'POST', headers, body: payload });
+      const third = await fetch(`${baseUrl}/api/advisory`, { method: 'POST', headers, body: payload });
+
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(third.status, 429);
+      assert.ok(Number(third.headers.get('retry-after')) >= 1);
     } finally {
       if (previousKey !== undefined) {
         process.env.GEMINI_API_KEY = previousKey;

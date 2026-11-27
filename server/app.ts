@@ -1,68 +1,39 @@
-import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import express, { type Express, type Request, type Response } from 'express';
 import {
   PRESET_CITIES,
   validateAirQualityReading,
   validateQuestionInput,
 } from '../shared/airQuality.ts';
+import { SERVER_CONFIG, isGeminiConfigured, logServerError } from './config.ts';
 import { answerAirQualityQuestion, generateAirQualityAdvisory } from './gemini.ts';
+import {
+  createRateLimiter,
+  malformedJsonErrorHandler,
+  securityHeadersMiddleware,
+} from './middleware.ts';
 
-interface RateLimitBucket {
-  count: number;
-  resetAt: number;
+export interface CreateApiAppOptions {
+  rateLimitMaxRequests?: number;
+  rateLimitWindowMs?: number;
 }
 
-function createRateLimiter(maxRequests: number, windowMs: number) {
-  const buckets = new Map<string, RateLimitBucket>();
-
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const now = Date.now();
-    const key = req.ip || req.socket.remoteAddress || 'unknown';
-    const current = buckets.get(key);
-
-    if (!current || current.resetAt <= now) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-
-    if (current.count >= maxRequests) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
-      res.setHeader('Retry-After', String(retryAfterSeconds));
-      res.status(429).json({
-        error: 'Too many requests. Please wait a moment before trying again.',
-      });
-      return;
-    }
-
-    current.count += 1;
-    next();
-  };
-}
-
-export function createApiApp(): Express {
+/** Creates and configures the Express API application without binding a port. */
+export function createApiApp(options?: CreateApiAppOptions): Express {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '32kb' }));
+  app.use(express.json({ limit: SERVER_CONFIG.jsonBodyLimit }));
+  app.use(securityHeadersMiddleware);
 
-  // Defensive security headers (X-Frame-Options intentionally omitted for iframe preview compatibility)
-  app.use((_req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    next();
+  const apiLimiter = createRateLimiter({
+    maxRequests: options?.rateLimitMaxRequests ?? SERVER_CONFIG.rateLimitMaxRequests,
+    windowMs: options?.rateLimitWindowMs ?? SERVER_CONFIG.rateLimitWindowMs,
   });
-
-  const apiLimiter = createRateLimiter(60, 60_000);
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
-      geminiConfigured: Boolean(
-        process.env.GEMINI_API_KEY &&
-          process.env.GEMINI_API_KEY.trim() !== '' &&
-          process.env.GEMINI_API_KEY.trim() !== 'MY_GEMINI_API_KEY'
-      ),
+      geminiConfigured: isGeminiConfigured(),
       presetCount: PRESET_CITIES.length,
     });
   });
@@ -88,7 +59,8 @@ export function createApiApp(): Express {
     try {
       const result = await generateAirQualityAdvisory(validation.value, { bypassCache });
       res.json(result);
-    } catch {
+    } catch (error) {
+      logServerError('POST /api/advisory', error);
       res.status(500).json({
         error: 'Unable to generate air quality advisory right now. Please try again.',
       });
@@ -112,21 +84,19 @@ export function createApiApp(): Express {
         validation.value.history
       );
       res.json(result);
-    } catch {
+    } catch (error) {
+      logServerError('POST /api/qa', error);
       res.status(500).json({
         error: 'Unable to answer your question right now. Please try again.',
       });
     }
   });
 
-  // Malformed JSON error handler
-  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
-    if (err instanceof SyntaxError && 'body' in err) {
-      res.status(400).json({ error: 'Malformed JSON request body.' });
-      return;
-    }
-    next(err);
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
   });
+
+  app.use(malformedJsonErrorHandler);
 
   return app;
 }

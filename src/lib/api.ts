@@ -5,9 +5,15 @@ import type {
   QaTurn,
 } from '../../shared/airQuality.ts';
 
-export class ApiRequestError extends Error {
-  status: number;
+interface ApiErrorBody {
+  error?: string;
   fieldErrors?: Record<string, string>;
+}
+
+/** Structured error thrown when an API endpoint returns a non-2xx response. */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly fieldErrors?: Record<string, string>;
 
   constructor(message: string, status: number, fieldErrors?: Record<string, string>) {
     super(message);
@@ -17,77 +23,79 @@ export class ApiRequestError extends Error {
   }
 }
 
-export async function fetchAdvisory(
-  reading: AirQualityReading,
-  options?: { signal?: AbortSignal; refresh?: boolean }
-): Promise<AdvisoryResponsePayload> {
-  const response = await fetch('/api/advisory', {
+/** Runtime type guard for aborted fetch requests. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+async function postJson<TResponse>(
+  url: string,
+  payload: Record<string, unknown>,
+  fallbackErrorMessage: string,
+  signal?: AbortSignal
+): Promise<TResponse> {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: options?.signal,
-    body: JSON.stringify({
-      city: reading.city,
-      country: reading.country,
-      aqi: reading.aqi,
-      pm25: reading.pm25,
-      pm10: reading.pm10,
-      isCustom: Boolean(reading.isCustom),
-      refresh: Boolean(options?.refresh),
-    }),
+    signal,
+    body: JSON.stringify(payload),
   });
 
-  const data = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    fieldErrors?: Record<string, string>;
-  } & Partial<AdvisoryResponsePayload>;
+  const body = (await response.json().catch(() => ({}))) as ApiErrorBody & TResponse;
 
   if (!response.ok) {
     throw new ApiRequestError(
-      data.error || 'Could not load air quality advisory.',
+      body.error || fallbackErrorMessage,
       response.status,
-      data.fieldErrors
+      body.fieldErrors
     );
   }
 
-  return data as AdvisoryResponsePayload;
+  return body;
 }
 
-export async function askAirQualityQuestion(
+function serializeReading(reading: AirQualityReading): Record<string, unknown> {
+  return {
+    city: reading.city,
+    country: reading.country,
+    aqi: reading.aqi,
+    pm25: reading.pm25,
+    pm10: reading.pm10,
+    isCustom: Boolean(reading.isCustom),
+  };
+}
+
+/** Requests a structured air quality advisory for a preset or custom city reading. */
+export function fetchAdvisory(
+  reading: AirQualityReading,
+  options?: { signal?: AbortSignal; refresh?: boolean }
+): Promise<AdvisoryResponsePayload> {
+  return postJson<AdvisoryResponsePayload>(
+    '/api/advisory',
+    {
+      ...serializeReading(reading),
+      refresh: Boolean(options?.refresh),
+    },
+    'Could not load air quality advisory.',
+    options?.signal
+  );
+}
+
+/** Submits a follow-up air quality question grounded in the active location reading. */
+export function askAirQualityQuestion(
   reading: AirQualityReading,
   question: string,
   history: QaTurn[],
   signal?: AbortSignal
 ): Promise<QaResponsePayload> {
-  const response = await fetch('/api/qa', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      reading: {
-        city: reading.city,
-        country: reading.country,
-        aqi: reading.aqi,
-        pm25: reading.pm25,
-        pm10: reading.pm10,
-        isCustom: Boolean(reading.isCustom),
-      },
+  return postJson<QaResponsePayload>(
+    '/api/qa',
+    {
+      reading: serializeReading(reading),
       question,
       history,
-    }),
-  });
-
-  const data = (await response.json().catch(() => ({}))) as {
-    error?: string;
-    fieldErrors?: Record<string, string>;
-  } & Partial<QaResponsePayload>;
-
-  if (!response.ok) {
-    throw new ApiRequestError(
-      data.error || 'Could not answer your question right now.',
-      response.status,
-      data.fieldErrors
-    );
-  }
-
-  return data as QaResponsePayload;
+    },
+    'Could not answer your question right now.',
+    signal
+  );
 }
