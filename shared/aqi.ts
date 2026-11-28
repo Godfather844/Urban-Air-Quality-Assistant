@@ -1,10 +1,14 @@
-import { READING_LIMITS } from './presets.ts';
+/**
+ * @module shared/aqi
+ * Pure AQI classification, calibration metadata, and WHO guideline math.
+ */
+import { AQI_THRESHOLDS, READING_LIMITS } from './constants.ts';
 import type { AqiCategory, AqiCategoryMeta } from './types.ts';
 
 const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   Good: {
     category: 'Good',
-    rangeLabel: '0–50 AQI',
+    rangeLabel: `${READING_LIMITS.aqiMin}–${AQI_THRESHOLDS.goodMax} AQI`,
     shortRisk: 'Minimal health risk',
     healthSummary:
       'Air quality is satisfactory with low particulate burden. Normal outdoor activity and natural indoor ventilation are safe for all groups.',
@@ -16,7 +20,7 @@ const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   },
   Moderate: {
     category: 'Moderate',
-    rangeLabel: '51–100 AQI',
+    rangeLabel: `${AQI_THRESHOLDS.goodMax + 1}–${AQI_THRESHOLDS.moderateMax} AQI`,
     shortRisk: 'Acceptable with minor sensitivity',
     healthSummary:
       'Air quality is acceptable for most people, though unusually sensitive individuals with asthma or chronic respiratory conditions may notice mild irritation during prolonged outdoor exertion.',
@@ -28,7 +32,7 @@ const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   },
   Poor: {
     category: 'Poor',
-    rangeLabel: '101–200 AQI',
+    rangeLabel: `${AQI_THRESHOLDS.moderateMax + 1}–${AQI_THRESHOLDS.poorMax} AQI`,
     shortRisk: 'Elevated risk for sensitive groups',
     healthSummary:
       'Particulate levels can trigger breathing discomfort, coughing, or eye irritation—especially for children, older adults, and people with asthma or heart disease.',
@@ -40,7 +44,7 @@ const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   },
   Unhealthy: {
     category: 'Unhealthy',
-    rangeLabel: '201–300 AQI',
+    rangeLabel: `${AQI_THRESHOLDS.poorMax + 1}–${AQI_THRESHOLDS.unhealthyMax} AQI`,
     shortRisk: 'Health effects across general public',
     healthSummary:
       'Everyone may begin to experience throat irritation, fatigue, or shortness of breath outdoors. Sensitive groups face a significantly higher risk of symptom flare-ups.',
@@ -52,7 +56,7 @@ const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   },
   Severe: {
     category: 'Severe',
-    rangeLabel: '301–500 AQI',
+    rangeLabel: `${AQI_THRESHOLDS.unhealthyMax + 1}–${AQI_THRESHOLDS.severeMax} AQI`,
     shortRisk: 'Emergency-level respiratory hazard',
     healthSummary:
       'Hazardous particulate concentration poses serious health risks even to healthy adults during brief exposure. Stay indoors with filtered air and avoid all strenuous outdoor activity.',
@@ -64,13 +68,19 @@ const AQI_CATEGORY_METADATA: Record<AqiCategory, AqiCategoryMeta> = {
   },
 };
 
-/** Maps a numeric AQI value into one of the five standard severity categories. */
+/**
+ * Maps a numeric AQI reading to one of the five standardized severity categories.
+ * Non-finite or negative values safely clamp to 0 ("Good").
+ */
 export function getAqiCategory(aqi: number): AqiCategory {
-  const normalized = Number.isFinite(aqi) ? Math.max(0, Math.round(aqi)) : 0;
-  if (normalized <= 50) return 'Good';
-  if (normalized <= 100) return 'Moderate';
-  if (normalized <= 200) return 'Poor';
-  if (normalized <= 300) return 'Unhealthy';
+  if (!Number.isFinite(aqi)) {
+    return 'Good';
+  }
+  const normalized = Math.max(READING_LIMITS.aqiMin, Math.round(aqi));
+  if (normalized <= AQI_THRESHOLDS.goodMax) return 'Good';
+  if (normalized <= AQI_THRESHOLDS.moderateMax) return 'Moderate';
+  if (normalized <= AQI_THRESHOLDS.poorMax) return 'Poor';
+  if (normalized <= AQI_THRESHOLDS.unhealthyMax) return 'Unhealthy';
   return 'Severe';
 }
 
@@ -81,16 +91,19 @@ export function getAqiCategoryMeta(aqi: number): AqiCategoryMeta {
 
 /** Converts an AQI reading into a clamped 0–100 percentage for the severity meter. */
 export function getAqiScalePosition(aqi: number): number {
-  const clamped = Math.max(
-    READING_LIMITS.aqiMin,
-    Math.min(READING_LIMITS.aqiMax, Number.isFinite(aqi) ? aqi : 0)
-  );
+  if (!Number.isFinite(aqi)) {
+    return 0;
+  }
+  const clamped = Math.max(READING_LIMITS.aqiMin, Math.min(READING_LIMITS.aqiMax, aqi));
   return Number(((clamped / READING_LIMITS.aqiMax) * 100).toFixed(1));
 }
 
-/** Computes how many times a particulate measurement exceeds its WHO 24-hour guideline. */
+/**
+ * Computes how many times a particulate measurement exceeds its WHO 24-hour guideline.
+ * Returns 0 for non-finite, negative, or zero measurements.
+ */
 export function getWhoGuidelineMultiplier(value: number, guideline: number): number {
-  if (!Number.isFinite(value) || value <= 0 || guideline <= 0) {
+  if (!Number.isFinite(value) || !Number.isFinite(guideline) || value <= 0 || guideline <= 0) {
     return 0;
   }
   return Number((value / guideline).toFixed(1));

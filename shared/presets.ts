@@ -1,33 +1,10 @@
-import type { AqiScaleBand, PresetCity } from './types.ts';
+/**
+ * @module shared/presets
+ * Curated urban air quality reference profiles spanning all five AQI bands.
+ */
+import type { PresetCity } from './types.ts';
 
-/** World Health Organization 24-hour particulate guideline limits (µg/m³). */
-export const WHO_24H_GUIDELINES = {
-  pm25: 15,
-  pm10: 45,
-} as const;
-
-/** Numeric and string bounds enforced on air quality reading inputs. */
-export const READING_LIMITS = {
-  cityMinLength: 2,
-  cityMaxLength: 80,
-  countryMaxLength: 60,
-  aqiMin: 0,
-  aqiMax: 500,
-  pm25Min: 0,
-  pm25Max: 1000,
-  pm10Min: 0,
-  pm10Max: 2000,
-} as const;
-
-/** Input bounds enforced on follow-up Q&A requests. */
-export const QA_LIMITS = {
-  questionMinLength: 3,
-  questionMaxLength: 400,
-  maxHistoryTurns: 6,
-  historyContentMaxLength: 500,
-} as const;
-
-/** Curated reference cities spanning all five AQI severity categories. */
+/** Reference cities available immediately without an external weather API. */
 export const PRESET_CITIES: readonly PresetCity[] = [
   {
     id: 'delhi',
@@ -95,13 +72,4 @@ export const PRESET_CITIES: readonly PresetCity[] = [
     profileNote:
       'Clean bay breeze dispersion keeping both fine and coarse particulates well below thresholds.',
   },
-] as const;
-
-/** Proportional segments for the 0–500 AQI visual severity meter. */
-export const AQI_SCALE_BANDS: readonly AqiScaleBand[] = [
-  { category: 'Good', min: 0, max: 50, widthPercent: 10, barColor: '#15803d' },
-  { category: 'Moderate', min: 51, max: 100, widthPercent: 10, barColor: '#b45309' },
-  { category: 'Poor', min: 101, max: 200, widthPercent: 20, barColor: '#c2410c' },
-  { category: 'Unhealthy', min: 201, max: 300, widthPercent: 20, barColor: '#b91c1c' },
-  { category: 'Severe', min: 301, max: 500, widthPercent: 40, barColor: '#7e22ce' },
 ] as const;

@@ -1,4 +1,8 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+/**
+ * @module src/components/ErrorBoundary
+ * Accessible React Error Boundary providing a graceful recovery state.
+ */
+import { Component, type ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -16,8 +20,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('Unhandled application render error:', error.message, info.componentStack);
+  componentDidCatch(error: Error): void {
+    if (import.meta.env.DEV) {
+      console.error('Unhandled application render error:', error.message);
+    }
   }
 
   private handleReset = (): void => {

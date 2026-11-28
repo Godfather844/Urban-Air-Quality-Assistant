@@ -1,4 +1,13 @@
-import { QA_LIMITS, READING_LIMITS } from './presets.ts';
+/**
+ * @module shared/validation
+ * Strict input validation, pollutant bounds checking, and assistant text sanitization.
+ */
+import {
+  DOMINANT_PM25_TO_PM10_RATIO,
+  QA_LIMITS,
+  READING_LIMITS,
+  TEXT_LIMITS,
+} from './constants.ts';
 import type {
   AirQualityReading,
   QaTurn,
@@ -24,11 +33,31 @@ function parseFiniteNumber(raw: unknown): number | null {
   return null;
 }
 
+function validateNumericRange(
+  raw: unknown,
+  min: number,
+  max: number,
+  missingMessage: string,
+  rangeMessage: string
+): { value: number | null; error?: string } {
+  const parsed = parseFiniteNumber(raw);
+  if (parsed === null) {
+    return { value: null, error: missingMessage };
+  }
+  if (parsed < min || parsed > max) {
+    return { value: null, error: rangeMessage };
+  }
+  return { value: parsed };
+}
+
 /** Strips ASCII control characters, collapses whitespace, and enforces a max length. */
 export function sanitizePlainText(
   input: string,
   maxLength: number = QA_LIMITS.questionMaxLength
 ): string {
+  if (typeof input !== 'string' || maxLength <= 0) {
+    return '';
+  }
   return input
     .replace(CONTROL_CHAR_PATTERN, '')
     .replace(/\s+/g, ' ')
@@ -36,8 +65,18 @@ export function sanitizePlainText(
     .slice(0, maxLength);
 }
 
-/** Normalizes model or fallback output into clean plain text without markdown artifacts. */
-export function formatAssistantText(raw: string, maxLength = 1200): string {
+/**
+ * Normalizes model or fallback output into clean plain text without markdown artifacts,
+ * truncating gracefully at a sentence boundary when exceeding maxLength.
+ */
+export function formatAssistantText(
+  raw: string,
+  maxLength: number = TEXT_LIMITS.defaultFormattedMax
+): string {
+  if (typeof raw !== 'string' || maxLength <= 0) {
+    return '';
+  }
+
   const cleaned = raw
     .replace(CONTROL_CHAR_PATTERN, '')
     .replace(/\r\n/g, '\n')
@@ -58,7 +97,7 @@ export function formatAssistantText(raw: string, maxLength = 1200): string {
     sliced.lastIndexOf('! '),
     sliced.lastIndexOf('? ')
   );
-  if (lastSentenceEnd > maxLength * 0.6) {
+  if (lastSentenceEnd > maxLength * TEXT_LIMITS.sentenceTruncationRatio) {
     return sliced.slice(0, lastSentenceEnd + 1).trim();
   }
   return `${sliced.trimEnd()}…`;
@@ -82,28 +121,39 @@ export function validateAirQualityReading(input: unknown): ValidationResult<AirQ
     errors.city = 'City name contains unsupported special characters.';
   }
 
-  const aqi = parseFiniteNumber(input.aqi);
-  if (aqi === null) {
-    errors.aqi = 'Enter a valid numeric AQI value.';
-  } else if (aqi < READING_LIMITS.aqiMin || aqi > READING_LIMITS.aqiMax) {
-    errors.aqi = `AQI must be between ${READING_LIMITS.aqiMin} and ${READING_LIMITS.aqiMax}.`;
-  }
+  const aqiResult = validateNumericRange(
+    input.aqi,
+    READING_LIMITS.aqiMin,
+    READING_LIMITS.aqiMax,
+    'Enter a valid numeric AQI value.',
+    `AQI must be between ${READING_LIMITS.aqiMin} and ${READING_LIMITS.aqiMax}.`
+  );
+  if (aqiResult.error) errors.aqi = aqiResult.error;
 
-  const pm25 = parseFiniteNumber(input.pm25);
-  if (pm25 === null) {
-    errors.pm25 = 'Enter a valid numeric PM2.5 reading.';
-  } else if (pm25 < READING_LIMITS.pm25Min || pm25 > READING_LIMITS.pm25Max) {
-    errors.pm25 = `PM2.5 must be between ${READING_LIMITS.pm25Min} and ${READING_LIMITS.pm25Max} µg/m³.`;
-  }
+  const pm25Result = validateNumericRange(
+    input.pm25,
+    READING_LIMITS.pm25Min,
+    READING_LIMITS.pm25Max,
+    'Enter a valid numeric PM2.5 reading.',
+    `PM2.5 must be between ${READING_LIMITS.pm25Min} and ${READING_LIMITS.pm25Max} µg/m³.`
+  );
+  if (pm25Result.error) errors.pm25 = pm25Result.error;
 
-  const pm10 = parseFiniteNumber(input.pm10);
-  if (pm10 === null) {
-    errors.pm10 = 'Enter a valid numeric PM10 reading.';
-  } else if (pm10 < READING_LIMITS.pm10Min || pm10 > READING_LIMITS.pm10Max) {
-    errors.pm10 = `PM10 must be between ${READING_LIMITS.pm10Min} and ${READING_LIMITS.pm10Max} µg/m³.`;
-  }
+  const pm10Result = validateNumericRange(
+    input.pm10,
+    READING_LIMITS.pm10Min,
+    READING_LIMITS.pm10Max,
+    'Enter a valid numeric PM10 reading.',
+    `PM10 must be between ${READING_LIMITS.pm10Min} and ${READING_LIMITS.pm10Max} µg/m³.`
+  );
+  if (pm10Result.error) errors.pm10 = pm10Result.error;
 
-  if (Object.keys(errors).length > 0 || aqi === null || pm25 === null || pm10 === null) {
+  if (
+    Object.keys(errors).length > 0 ||
+    aqiResult.value === null ||
+    pm25Result.value === null ||
+    pm10Result.value === null
+  ) {
     return { valid: false, errors };
   }
 
@@ -117,11 +167,12 @@ export function validateAirQualityReading(input: unknown): ValidationResult<AirQ
     value: {
       city: rawCity,
       country,
-      aqi: Math.round(aqi),
-      pm25: Number(pm25.toFixed(1)),
-      pm10: Number(pm10.toFixed(1)),
+      aqi: Math.round(aqiResult.value),
+      pm25: Number(pm25Result.value.toFixed(1)),
+      pm10: Number(pm10Result.value.toFixed(1)),
       isCustom: Boolean(input.isCustom),
-      dominantPollutant: pm25 >= pm10 * 0.5 ? 'PM2.5' : 'PM10',
+      dominantPollutant:
+        pm25Result.value >= pm10Result.value * DOMINANT_PM25_TO_PM10_RATIO ? 'PM2.5' : 'PM10',
     },
   };
 }

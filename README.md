@@ -20,13 +20,16 @@ An accessible, lightweight full-stack web application that translates urban air 
 │   ├── app.ts                      # Express API routes (/api/health, /api/presets, /api/advisory, /api/qa)
 │   ├── cache.ts                    # Bounded in-memory TtlCache for fast repeat advisories
 │   ├── config.ts                   # Centralized runtime limits, env key lookup, and sanitized logging
-│   ├── gemini.ts                   # Server-side @google/genai integration with responseSchema and fallback
+│   ├── gemini.ts                   # Injectable server-side Gemini service with caching and fallbacks
+│   ├── geminiHelpers.ts            # Error classification, single-retry policy, and advisory normalization
+│   ├── geminiPrompts.ts            # Prompt builders, system instructions, and structured JSON schema
 │   └── middleware.ts               # Security headers, memory-bounded per-IP rate limiter, JSON error handler
 ├── shared/
 │   ├── airQuality.ts               # Public domain barrel re-export
 │   ├── aqi.ts                      # Five-band AQI classification, metadata tokens, and WHO ratio math
+│   ├── constants.ts                # Single source of truth for AQI thresholds, limits, and WHO guidelines
 │   ├── fallback.ts                 # Evidence-based fallback advisory and topic-aware Q&A builders
-│   ├── presets.ts                  # Curated preset cities, WHO guidelines, and validation bounds
+│   ├── presets.ts                  # Curated preset city profiles
 │   ├── types.ts                    # Shared strict TypeScript contracts
 │   └── validation.ts               # Input validation, text sanitization, and response formatting
 ├── src/
@@ -41,12 +44,18 @@ An accessible, lightweight full-stack web application that translates urban air 
 │       ├── CitySelector.tsx        # Tabbed monitoring station container
 │       ├── PresetCityList.tsx      # Searchable preset city list
 │       ├── CustomReadingForm.tsx   # Validated custom city/AQI/PM2.5/PM10 input form
+│       ├── FormField.tsx           # Reusable WCAG-accessible labeled input primitive
 │       ├── AqiOverview.tsx         # AQI readout, calibrated severity meter, WHO particulate benchmarks
-│       ├── AdvisoryPanel.tsx       # Outdoor/commute/mask guidance + filterable sensitive groups
+│       ├── AdvisoryPanel.tsx       # Composes GuidanceSection and SensitiveGroupsSection
+│       ├── GuidanceSection.tsx     # Outdoor/commute/mask/indoor guidance and priority steps
+│       ├── SensitiveGroupsSection.tsx # Filterable advice for children, older adults, and respiratory groups
 │       ├── QaAssistant.tsx         # Grounded follow-up Q&A interface with aria-live updates
 │       └── ErrorBoundary.tsx       # Accessible React error boundary
 └── tests/
-    └── airQuality.test.ts          # Automated unit, cache, and Express API integration tests
+    ├── aqi.test.ts                 # AQI boundaries, scale continuity, WHO ratios, preset integrity
+    ├── validation.test.ts          # Pollutant edge cases, sanitization, and response formatting
+    ├── gemini.test.ts              # Deterministic mocked Gemini service, retries, cache, and fallbacks
+    └── api.test.ts                 # Express HTTP endpoints, security headers, 400/404, and 429 rate limits
 ```
 
 ## How Gemini AI Is Used

@@ -1,5 +1,10 @@
+/**
+ * @module shared/fallback
+ * Deterministic, evidence-based fallback advisory and Q&A builders used when
+ * Gemini AI is unavailable, unconfigured, or rate-limited.
+ */
 import { getAqiCategory, getWhoGuidelineMultiplier } from './aqi.ts';
-import { WHO_24H_GUIDELINES } from './presets.ts';
+import { AQI_THRESHOLDS, WHO_24H_GUIDELINES } from './constants.ts';
 import type { AirQualityAdvisory, AirQualityReading, AqiCategory } from './types.ts';
 
 type AdvisoryTemplate = Omit<AirQualityAdvisory, 'summary'>;
@@ -152,34 +157,34 @@ export function buildFallbackAdvisory(reading: AirQualityReading): AirQualityAdv
   };
 }
 
-/** Generates a concise, topic-aware fallback Q&A answer when Gemini is unavailable. */
+/** Generates a concise, topic-aware fallback Q&A answer using centralized AQI thresholds. */
 export function buildFallbackAnswer(reading: AirQualityReading, question: string): string {
   const category = getAqiCategory(reading.aqi);
   const normalizedQuestion = question.toLowerCase();
 
   if (/(mask|n95|kn95|ffp2|respirator)/.test(normalizedQuestion)) {
-    if (reading.aqi <= 50) {
+    if (reading.aqi <= AQI_THRESHOLDS.goodMax) {
       return `In ${reading.city} (AQI ${reading.aqi}, Good), no mask is required for daily commutes or outdoor time.`;
     }
-    if (reading.aqi <= 100) {
+    if (reading.aqi <= AQI_THRESHOLDS.moderateMax) {
       return `At AQI ${reading.aqi} (Moderate) in ${reading.city}, most people do not need a mask. If you have asthma or commute along dense traffic corridors, a fitted N95/KN95 can reduce exposure to roadside PM2.5 (${reading.pm25} µg/m³).`;
     }
     return `With ${reading.city} at AQI ${reading.aqi} (${category}) and PM2.5 at ${reading.pm25} µg/m³, wear a snug N95, KN95, or FFP2 respirator outdoors. Make sure the nose wire and cheek edges seal tightly—cloth or loose surgical masks let fine PM2.5 particles bypass the filter.`;
   }
 
   if (/(jog|run|exercise|workout|gym|walk|cycle|bike|sport)/.test(normalizedQuestion)) {
-    if (reading.aqi <= 100) {
+    if (reading.aqi <= AQI_THRESHOLDS.moderateMax) {
       const caveat =
-        reading.aqi > 50
+        reading.aqi > AQI_THRESHOLDS.goodMax
           ? 'If you are sensitive to particulates, choose parks away from major roads and keep sessions moderate.'
           : 'Normal intensity and duration are fine.';
       return `Outdoor exercise in ${reading.city} (AQI ${reading.aqi}, ${category}) is generally safe. ${caveat}`;
     }
-    return `Outdoor jogging or intense workouts are not advisable in ${reading.city} right now (AQI ${reading.aqi}, ${category}, PM2.5 ${reading.pm25} µg/m³). Heavy breathing pulls fine particles deeper into the lungs—move cardio indoors with filtered air until AQI drops below 100.`;
+    return `Outdoor jogging or intense workouts are not advisable in ${reading.city} right now (AQI ${reading.aqi}, ${category}, PM2.5 ${reading.pm25} µg/m³). Heavy breathing pulls fine particles deeper into the lungs—move cardio indoors with filtered air until AQI drops below ${AQI_THRESHOLDS.moderateMax}.`;
   }
 
   if (/(window|indoor|purifier|hepa|ventila|ac|air conditioner|home)/.test(normalizedQuestion)) {
-    if (reading.aqi <= 50) {
+    if (reading.aqi <= AQI_THRESHOLDS.goodMax) {
       return `Because ${reading.city} is currently Good (AQI ${reading.aqi}), opening windows for cross-ventilation is beneficial and refreshes indoor air.`;
     }
     return `Keep exterior windows closed in ${reading.city} while AQI is ${reading.aqi} (${category}). If you have a HEPA air purifier, run it continuously in occupied rooms, set AC units to recirculate rather than draw outdoor air, and avoid indoor smoke sources like incense or unvented frying.`;

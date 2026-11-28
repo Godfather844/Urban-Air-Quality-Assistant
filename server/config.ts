@@ -1,3 +1,8 @@
+/**
+ * @module server/config
+ * Centralized backend runtime constants, API key discovery, and sanitized error logging.
+ */
+
 /** Centralized backend runtime limits and Gemini integration settings. */
 export const SERVER_CONFIG = {
   defaultPort: 3000,
@@ -30,6 +35,9 @@ export function isGeminiConfigured(): boolean {
 
 /** Logs a sanitized server error without exposing sensitive environment values. */
 export function logServerError(context: string, error: unknown): void {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
   const message =
     error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
   console.error(`[${new Date().toISOString()}] [${context}] ${message}`);

@@ -1,3 +1,7 @@
+/**
+ * @module src/components/CustomReadingForm
+ * Validated custom city, AQI, PM2.5, and PM10 sensor input form.
+ */
 import { useEffect, useId, useState, type FormEvent, type RefObject } from 'react';
 import {
   READING_LIMITS,
@@ -5,6 +9,7 @@ import {
   getAqiCategoryMeta,
   validateAirQualityReading,
 } from '../../shared/airQuality.ts';
+import { FormField } from './FormField.tsx';
 
 interface CustomReadingFormProps {
   initialCity: string;
@@ -19,6 +24,7 @@ const DEFAULT_FORM_VALUES = {
   pm10: '168',
 } as const;
 
+/** Renders an accessible form allowing users to analyze custom urban particulate readings. */
 export function CustomReadingForm({
   initialCity,
   activeReading,
@@ -110,144 +116,79 @@ export function CustomReadingForm({
       onSubmit={handleSubmit}
       className="space-y-4 p-4"
     >
-      <div>
-        <label htmlFor={cityId} className="block text-xs font-medium text-slate-800">
-          City or neighborhood name
-        </label>
-        <input
-          ref={cityInputRef}
-          id={cityId}
-          type="text"
-          value={cityInput}
-          onChange={(e) => {
-            setCityInput(e.target.value);
-            clearFieldError('city');
-          }}
-          placeholder="e.g., Pune, Chicago, Seoul"
-          maxLength={READING_LIMITS.cityMaxLength}
-          aria-invalid={Boolean(fieldErrors.city)}
-          aria-describedby={fieldErrors.city ? `${cityId}-error` : undefined}
-          className={`mt-1.5 min-h-[40px] w-full rounded-md border px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 ${
-            fieldErrors.city
-              ? 'border-red-600 focus:border-red-700 focus:ring-red-700/20'
-              : 'border-slate-300 focus:border-blue-700 focus:ring-blue-700/20'
-          }`}
-        />
-        {fieldErrors.city && (
-          <p id={`${cityId}-error`} role="alert" className="mt-1 text-xs font-medium text-red-700">
-            {fieldErrors.city}
-          </p>
-        )}
-      </div>
+      <FormField
+        id={cityId}
+        inputRef={cityInputRef}
+        label="City or neighborhood name"
+        type="text"
+        value={cityInput}
+        onChange={(e) => {
+          setCityInput(e.target.value);
+          clearFieldError('city');
+        }}
+        placeholder="e.g., Pune, Chicago, Seoul"
+        maxLength={READING_LIMITS.cityMaxLength}
+        error={fieldErrors.city}
+      />
 
-      <div>
-        <div className="flex items-baseline justify-between gap-2">
-          <label htmlFor={aqiId} className="block text-xs font-medium text-slate-800">
-            AQI ({READING_LIMITS.aqiMin}–{READING_LIMITS.aqiMax})
-          </label>
-          {previewMeta && (
+      <FormField
+        id={aqiId}
+        label={`AQI (${READING_LIMITS.aqiMin}–${READING_LIMITS.aqiMax})`}
+        labelAdornment={
+          previewMeta ? (
             <span className={`text-xs font-medium ${previewMeta.textClass}`}>
               {previewMeta.category}
             </span>
-          )}
-        </div>
-        <input
-          id={aqiId}
-          type="number"
-          inputMode="numeric"
-          min={READING_LIMITS.aqiMin}
-          max={READING_LIMITS.aqiMax}
-          step={1}
-          value={aqiInput}
-          onChange={(e) => {
-            setAqiInput(e.target.value);
-            clearFieldError('aqi');
-          }}
-          aria-invalid={Boolean(fieldErrors.aqi)}
-          aria-describedby={fieldErrors.aqi ? `${aqiId}-error` : undefined}
-          className={`mt-1.5 min-h-[40px] w-full rounded-md border px-3 py-2 font-mono text-sm tabular-nums text-slate-900 focus:outline-none focus:ring-2 ${
-            fieldErrors.aqi
-              ? 'border-red-600 focus:border-red-700 focus:ring-red-700/20'
-              : 'border-slate-300 focus:border-blue-700 focus:ring-blue-700/20'
-          }`}
-        />
-        {fieldErrors.aqi && (
-          <p id={`${aqiId}-error`} role="alert" className="mt-1 text-xs font-medium text-red-700">
-            {fieldErrors.aqi}
-          </p>
-        )}
-      </div>
+          ) : null
+        }
+        type="number"
+        inputMode="numeric"
+        monospace
+        min={READING_LIMITS.aqiMin}
+        max={READING_LIMITS.aqiMax}
+        step={1}
+        value={aqiInput}
+        onChange={(e) => {
+          setAqiInput(e.target.value);
+          clearFieldError('aqi');
+        }}
+        error={fieldErrors.aqi}
+      />
 
       <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label htmlFor={pm25Id} className="block text-xs font-medium text-slate-800">
-            PM2.5 (µg/m³)
-          </label>
-          <input
-            id={pm25Id}
-            type="number"
-            inputMode="decimal"
-            min={READING_LIMITS.pm25Min}
-            max={READING_LIMITS.pm25Max}
-            step="0.1"
-            value={pm25Input}
-            onChange={(e) => {
-              setPm25Input(e.target.value);
-              clearFieldError('pm25');
-            }}
-            aria-invalid={Boolean(fieldErrors.pm25)}
-            aria-describedby={fieldErrors.pm25 ? `${pm25Id}-error` : undefined}
-            className={`mt-1.5 min-h-[40px] w-full rounded-md border px-3 py-2 font-mono text-sm tabular-nums text-slate-900 focus:outline-none focus:ring-2 ${
-              fieldErrors.pm25
-                ? 'border-red-600 focus:border-red-700 focus:ring-red-700/20'
-                : 'border-slate-300 focus:border-blue-700 focus:ring-blue-700/20'
-            }`}
-          />
-          {fieldErrors.pm25 && (
-            <p
-              id={`${pm25Id}-error`}
-              role="alert"
-              className="mt-1 text-xs font-medium text-red-700"
-            >
-              {fieldErrors.pm25}
-            </p>
-          )}
-        </div>
+        <FormField
+          id={pm25Id}
+          label="PM2.5 (µg/m³)"
+          type="number"
+          inputMode="decimal"
+          monospace
+          min={READING_LIMITS.pm25Min}
+          max={READING_LIMITS.pm25Max}
+          step="0.1"
+          value={pm25Input}
+          onChange={(e) => {
+            setPm25Input(e.target.value);
+            clearFieldError('pm25');
+          }}
+          error={fieldErrors.pm25}
+        />
 
-        <div>
-          <label htmlFor={pm10Id} className="block text-xs font-medium text-slate-800">
-            PM10 (µg/m³)
-          </label>
-          <input
-            id={pm10Id}
-            type="number"
-            inputMode="decimal"
-            min={READING_LIMITS.pm10Min}
-            max={READING_LIMITS.pm10Max}
-            step="0.1"
-            value={pm10Input}
-            onChange={(e) => {
-              setPm10Input(e.target.value);
-              clearFieldError('pm10');
-            }}
-            aria-invalid={Boolean(fieldErrors.pm10)}
-            aria-describedby={fieldErrors.pm10 ? `${pm10Id}-error` : undefined}
-            className={`mt-1.5 min-h-[40px] w-full rounded-md border px-3 py-2 font-mono text-sm tabular-nums text-slate-900 focus:outline-none focus:ring-2 ${
-              fieldErrors.pm10
-                ? 'border-red-600 focus:border-red-700 focus:ring-red-700/20'
-                : 'border-slate-300 focus:border-blue-700 focus:ring-blue-700/20'
-            }`}
-          />
-          {fieldErrors.pm10 && (
-            <p
-              id={`${pm10Id}-error`}
-              role="alert"
-              className="mt-1 text-xs font-medium text-red-700"
-            >
-              {fieldErrors.pm10}
-            </p>
-          )}
-        </div>
+        <FormField
+          id={pm10Id}
+          label="PM10 (µg/m³)"
+          type="number"
+          inputMode="decimal"
+          monospace
+          min={READING_LIMITS.pm10Min}
+          max={READING_LIMITS.pm10Max}
+          step="0.1"
+          value={pm10Input}
+          onChange={(e) => {
+            setPm10Input(e.target.value);
+            clearFieldError('pm10');
+          }}
+          error={fieldErrors.pm10}
+        />
       </div>
 
       {submittedNotice && (
